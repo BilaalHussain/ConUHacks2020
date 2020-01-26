@@ -1,8 +1,5 @@
-# body-pix Demos
+# ConUHacks 2020
 
-## Contents
-
-The demo shows how to estimate segmentation in real-time from a webcam video stream.
 
 ## Setup
 
