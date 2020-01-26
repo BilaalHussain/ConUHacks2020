@@ -32,7 +32,7 @@ import * as partColorScales from './part_color_scales';
 const stats = new Stats();
 
 let lineSeries;
-
+let sentimentSeries;
 const state = {
     video: null,
     stream: null,
@@ -166,7 +166,7 @@ async function loadVideo(cameraLabel) {
     state.video.play();
 }
 
-const defaultQuantBytes = 2;
+const defaultQuantBytes = 4;
 
 const defaultMobileNetMultiplier = isMobile() ? 0.5 : 0.75;
 const defaultMobileNetStride = 16;
@@ -824,6 +824,9 @@ const WRIST_R = 10;
 
 
 function postureScore (segmentation) {
+    if(!segmentation || !segmentation.allPoses || !segmentation.allPoses[0])
+        return;
+
     let poses = segmentation.allPoses[0].keypoints;
     let baseScore = 100;
 
@@ -833,29 +836,34 @@ function postureScore (segmentation) {
     let elbowWidth = poses[ELBOW_L].position.x - poses[ELBOW_R].position.x;
     let shoulderWidth = poses[SHOULDER_L].position.x - poses[SHOULDER_R].position.x;
     let noseHeight = 2* poses[NOSE].position.y - (poses[SHOULDER_R].position.y + poses[SHOULDER_L].position.y);
-
-    console.log("NH",noseHeight);
-
-    if(elbowWidth < shoulderWidth) {
-        penalty += 50;
-        warnings.push('open up body posture (elbows)');
-    }
-
     let handWidth = poses[WRIST_L].position.x - poses[WRIST_R].position.x;
     let handHeight = poses[WRIST_L].position.y - poses[WRIST_R].position.y;
-    if(handWidth < 350) {
-        penalty += 20;
-        warnings.push('open up body posture (hands)');
-    }
-    if(handWidth > shoulderWidth) {
-        penalty -= 40;
-    }
 
-    let random = (handWidth * 301) % 3
+    let random = (handWidth * 301) % 3;
 
     if(random % 2 == 0) {
         random *= -1;
     }
+
+    if(noseHeight > -210){
+        penalty += random/2 + 40;
+    }
+
+    if(elbowWidth < shoulderWidth) {
+        penalty += 50 - random;
+        warnings.push('open up body posture (elbows)');
+    }
+
+
+    if(handWidth < 350) {
+        penalty += 20 - random;
+        warnings.push('open up body posture (hands)');
+    }
+    if(handWidth > shoulderWidth) {
+        penalty -= 40 + 2*random;
+    }
+
+
 
 
     return baseScore - penalty + random;
@@ -867,7 +875,10 @@ let globalTime = 0;
 async function setupDashboard(){
     let chartElement = document.getElementById('chart');
     const chart = createChart(chartElement, {width:200, height:150});
+    const chart2 = createChart(chartElement, {width:200, height:150});
+
     lineSeries = chart.addLineSeries();
+    sentimentSeries = chart2.addLineSeries();
 }
 
 
@@ -898,6 +909,64 @@ export async function bindPage() {
 navigator.getUserMedia =
     navigator.getUserMedia ||
     navigator.webkitGetUserMedia ||
-    navigator.mozGetUserMedia;
+    navigator.mopzGetUserMedia;
 // kick off the demo
 bindPage();
+
+var fillers = 0;
+var wordCount = 0;
+var numTicks = 1;
+
+setInterval( () => {
+    let req = new XMLHttpRequest();
+    numTicks += 1;
+    req.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+            let resp = JSON.parse(this.responseText);
+            //console.log("RESP:", resp)
+            if(resp.ret == ""){
+                document.getElementById("tmp").innerHTML = "("+resp.tmp+")";
+            }
+            else {
+                //Finished phrase
+                let tokens = resp.ret.split(' ');
+                let newFillers = tokens.filter((ele)=> {
+                    let lower = ele.toLowerCase();
+                    return lower == "like" || lower.startsWith("um") || lower == "sorta" || lower == "kinda" ;
+                });
+                //console.log("tl", tokens.length)
+                wordCount+= tokens.length - 1;
+                fillers+=newFillers.length;
+
+                document.getElementById("tmp").innerHTML ="";
+                document.getElementById("text_output").innerHTML +=" "+ resp.ret;
+                //console.log("nt", numTicks)
+                //console.log("wpm", wordCount * 120, wordCount * 120 / numTicks);
+                let wpm = (wordCount * 120) / numTicks;
+
+                document.getElementById("wpm").innerHTML = "WPM:" + wpm;
+                document.getElementById("numFillerWords").innerHTML = "Filler Words :" + fillers;
+                sentimentSeries.update({"time": numTicks, value: resp.score});
+            }//else
+        };//main if
+    }
+    req.open("GET", "http://localhost:3000/");
+    req.send();
+}, 500)
+
+// const request = require('request');
+// setInterval(()=> {
+
+//     let text = document.getElementById("text_output").innerHTML;
+//     console.log('text', text)
+//     request.post({url:'http://localhost:3000/sentiment',
+//                   body:text},
+//                  (err, httpResponse, body)=> {
+//                      if (err) {
+//                          return console.error('upload failed:', err);
+//                      }
+//                      console.log('Succ  Server responded with:', body);
+//                  });
+
+
+// }, 3000);
